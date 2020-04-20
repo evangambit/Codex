@@ -1,10 +1,3 @@
-
-TODO: support searching submissions too
-
-TODO: grabbing comments from large posts is very slow right now; see if that can be fixed.
-
-TODO: indices should support incremental updating.  `refresh.py` is a step in this direction, but all the new comments need to be written somewhere so `build_comment_db.py` and `build_index.py` can read from it and only touch newly added comments.
-
 # What is this?
 
 This is code does a few things
