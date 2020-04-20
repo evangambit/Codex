@@ -1,0 +1,249 @@
+<html>
+<meta charset="UTF-8">
+<head>
+<style>
+html, body {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  background-color: #000;
+  color: #bbb;
+  text-align: center;
+  overflow-x: hidden;
+  overflow-y: auto
+}
+body {
+  display: flex;
+  flex-direction: row;
+}
+.commentcontainer {
+  text-align: left;
+  padding: 0.5em;
+  padding-top: 1em;
+
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+.commentheader {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  padding: 0.25em;
+  margin-top: 1em;
+}
+.md {
+  overflow: hidden;
+  flex: 1;
+  overflow-wrap: break-word;
+}
+
+#content {
+  max-width: 600px;;
+}
+
+blockquote {
+  display: block;
+  border-left: solid #bbb 4px;
+  padding: 0 8px;
+  margin: 16px 0;
+}
+code {
+  font-family: monospace;
+}
+a {
+  color: #88f;
+  text-decoration: underline;
+}
+a:hover {
+  text-decoration: none;
+}
+
+#guidelink {
+  vertical-align: bottom;
+  font-size: 0.8em;
+  margin-top: 1.4em;
+}
+
+#helptable > * > tr > td:first-child {
+  text-align: right;
+  padding-right: 1em;
+}
+
+input[type=text]:focus {
+  outline: none;
+  background-color: #444;;
+  border-color: white;
+}
+
+input[type=text] {
+  width: 15em;
+  font-size: 1em;
+  background-color: #111;
+  border: none;
+  border-bottom: solid #aaa 1px;
+  padding: 0.5em;
+  color: white;
+}
+
+.term {
+  font-weight: 800;
+  color: #fff;
+}
+</style>
+<script>
+
+const kMaxCommentHeight = 384;
+
+window.onkeydown = (e) => {
+  if (document.activeElement === searchInput) {
+    if (e.key === 'Enter') {
+      window.location = './search?query=' + encodeURIComponent(searchInput.value);
+    }
+  }
+}
+
+function expand(id) {
+  let div = document.getElementById(id);
+  div.style.height = '';
+  div.removeChild(div.children[2]);
+}
+
+window.onload = () => {
+  let A = window.location.href.split('?').slice(1).join('?').split('&');
+  for (let i in A) {
+    A[i] = A[i].split('=');
+  }
+
+  let args = {};
+  for (let a of A) {
+    args[a[0]] = a[1];
+  }
+  
+  if (('query' in args) && args.query != '') {
+    searchInput.value = decodeURIComponent(args.query);
+  }
+
+  const numComments = document.getElementsByClassName('md').length;
+
+  if (numComments > 1) {
+    const parents = Array.from(content.children);
+    for (let div of document.getElementsByClassName('md')) {
+      const parent = div.parentNode;
+      let r = parent.getBoundingClientRect();
+      if (r.height > kMaxCommentHeight) {
+        parent.style.height = kMaxCommentHeight;
+        let expand = document.createElement('DIV');
+        expand.innerHTML = `
+        <div style='padding:0.4em; background-color:#111; position:absolute; right:10%; bottom:0; border-radius:0.5em;'>
+          <a href='javascript:expand("` + parent.id + `")'>
+            expand...
+          </a>
+        </div>
+        `;
+        expand.style.position = 'absolute';
+        expand.style.bottom = 0;
+        expand.style.right = 0;
+        expand.style.textAlign = 'center';
+        expand.style.minWidth = '100%';
+        expand.style.height = '6em';
+        expand.style.background = `linear-gradient(
+          to bottom,
+          #1110,
+          #111c 50%,
+          #111f 100%
+        )`;
+        expand.style.textAlign = 'right';
+        parent.appendChild(expand);
+      }
+    }
+  }
+}
+
+function showguide() {
+  guidediv.style.display = 'block';
+  guidelink.innerText = 'hide guide';
+  guidelink.href = 'javascript:hideguide()';
+}
+function hideguide() {
+  guidediv.style.display = 'none';
+  guidelink.innerText = 'show guide';
+  guidelink.href = 'javascript:showguide()';
+}
+</script>
+</head>
+<body>
+<div style='flex:1'></div>
+
+<div id='content'>
+  <div style='width:100%; padding-top:1em; display:flex; flex-direction:row;'>
+    <input id='searchInput' type='text' style='flex:1;' placeholder='search'>
+    <a id='guidelink' href='javascript:showguide()'>show guide</a>
+  </div>
+
+  <div style='margin-top:1em;'>
+    {{num_results_msg}}
+  </div>
+
+  <div id='guidediv' style='display:none; margin-top:1em; background-color: #333; padding:1em; text-align:left;'>
+    <h3>Guide</h3>
+    <p>
+      Results satisfy <i>all</i> (not any) constraints of the query.  Search only supports alphanumeric tokens (e.g. "5-years" is an invalid query, but "5 years" will search for comments that contain "5" and contain "years").
+    </p>
+    <p>
+      The only reason to contain a non-alphanumeric character (other than space) in a query is to use some "special" constraints.  Below is a list of such constraints:
+    </p>
+    <p>
+      <table id='helptable' style='width:100%;'>
+        <thead>
+          <tr><td>Example</td><td>Meaning</td></tr>
+        </thead>
+        <tbody>
+          <tr><td colspan=2 style='text-align:left;'><hr>Boolean Contraints:</td></tr>
+          <tr><td>foo</td><td>comment contains the word "foo"</td></tr>
+          <tr><td>sort:score</td><td>sort results by score</td></tr>
+          <tr><td>sort:new</td><td>sort results by most recent</td></tr>
+          <tr><td>author:foo</td><td>comment's author is u/foo</td></tr>
+          <tr><td>pauthor:foo</td><td>comment's parent's author is u/foo)</td></tr>
+          <tr><td>subreddit:slatestarcodex</td><td>comment comes from r/slatestarcodex</td></tr>
+          <tr><td>linksto:arxiv.org</td><td>comment contains a link somewhere on arvix.org</td></tr>
+          <tr><td>meta:cw</td><td>comment lives in a culture war thread</td></tr>
+          <tr><td>meta:notcw</td><td>comment does <i>not</i> live in a culture war thread</td></tr>
+          <tr><td colspan=2 style='text-align:left;'><hr>Interval Contraints:</td></tr>
+          <tr><td>time&lt;20200102</td><td>comment was created before January 2, 2020</td></tr>
+          <tr><td>score&gt;5</td><td>comment's score is over 5</td></tr>
+          <tr><td>depth:0</td><td>comment is a  top-level comment</td></tr>
+        </tbody>
+      </table>
+    </p>    
+  </div>
+
+  <br>
+
+  {{#comments}}
+  <div id="{{id}}" class='commentcontainer'>
+    <div class='commentheader'>
+      <div>{{score}} <img src='uparrow.png' style='height:0.8em;'></div>
+      <div style='flex:1'></div>
+      {{#author}}
+      <div><a href="http://reddit.com/u/{{author}}">u/{{author}}</a></div>
+      {{/author}}
+      {{^author}}
+      <div>[author deleted]</div>
+      {{/author}}
+      <div style='flex:1'></div>
+      <div><a href="http://reddit.com/r/{{subreddit}}">r/{{subreddit}}</a></div>
+      <div style='flex:1'></div>
+      <div><a href="https://www.reddit.com{{{permalink}}}">link</a></div>
+    </div>
+    {{{body_html}}}
+  </div>
+  {{/comments}}
+
+</div>
+
+<div style='flex:1'></div>
+
+</body>
+</html>
