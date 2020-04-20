@@ -135,3 +135,5 @@ for thread in threads():
     c.execute("INSERT INTO comments VALUES (?, ?)", [id_, json.dumps(comment)])
 
 conn.commit()
+
+print(len(ids), 'comments inserted')
