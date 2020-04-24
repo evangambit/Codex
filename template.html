@@ -60,10 +60,11 @@ a:hover {
   text-decoration: none;
 }
 
-#guidelink {
+#searchHelpLink {
   vertical-align: bottom;
   font-size: 0.8em;
   margin-top: 1.4em;
+  margin-left: 0.2em;
 }
 
 #helptable > * > tr > td:first-child {
@@ -161,15 +162,27 @@ window.onload = () => {
   }
 }
 
-function showguide() {
-  guidediv.style.display = 'block';
-  guidelink.innerText = 'hide guide';
-  guidelink.href = 'javascript:hideguide()';
+function showhelp(type) {
+  if (type === 'search') {
+    searchHelpDiv.style.display = 'block';
+    searchHelpLink.innerText = 'help (hide)';
+    searchHelpLink.href = "javascript:hidehelp('search')";
+  } else if (type === 'filtered results') {
+    filterHelpDiv.style.display = 'block';
+    filterHelpLink.innerText = '? (hide)';
+    filterHelpLink.href = "javascript:hidehelp('filtered results')";
+  }
 }
-function hideguide() {
-  guidediv.style.display = 'none';
-  guidelink.innerText = 'show guide';
-  guidelink.href = 'javascript:showguide()';
+function hidehelp(type) {
+  if (type === 'search') {
+    searchHelpDiv.style.display = 'none';
+    searchHelpLink.innerText = 'help';
+    searchHelpLink.href = "javascript:showhelp('search')";
+  } else if (type === 'filtered results') {
+    filterHelpDiv.style.display = 'none';
+    filterHelpLink.innerText = '?';
+    filterHelpLink.href = "javascript:showhelp('filtered results')";
+  }
 }
 </script>
 </head>
@@ -179,17 +192,25 @@ function hideguide() {
 <div id='content'>
   <div style='width:100%; padding-top:1em; display:flex; flex-direction:row;'>
     <input id='searchInput' type='text' style='flex:1;' placeholder='search'>
-    <a id='guidelink' href='javascript:showguide()'>show guide</a>
+    <a id='searchHelpLink' href="javascript:showhelp('search')">help</a>
   </div>
 
   <div style='margin-top:1em;'>
     {{num_results_msg}}
   </div>
 
-  <div id='guidediv' style='display:none; margin-top:1em; background-color: #333; padding:1em; text-align:left;'>
+  <div style='margin-top:1em;'>
+    Dropped Results: {{num_excluded}}<sup><a id='filterHelpLink' href="javascript:showhelp('filtered results')">?</a></sup>
+  </div>
+
+  <div id='searchHelpDiv' style='display:none; margin-top:1em; background-color: #333; padding:1em; text-align:left; position:relative;'>
     <h3>Guide</h3>
+    <a style='position:absolute; right:0.5em; top:0.5em;' href="javascript:(hidehelp('filtered results'))">hide</a>
     <p>
-      Results satisfy <i>all</i> (not any) constraints of the query.  Search only supports alphanumeric tokens (e.g. "5-years" is an invalid query, but "5 years" will search for comments that contain "5" and contain "years").
+      By default only results that satisfy <i>all</i> (not any) constraints of the query.  Search only supports alphanumeric tokens (e.g. "5-years" is an invalid query, but "5 years" will search for comments that contain "5" and contain "years").
+    </p>
+    <p>
+      The "OR" operator is supported.  For instance "apple (green OR blue)" will find all comments that contain the word "apple" <i>and</i> also contain the word "green" or the word "blue".
     </p>
     <p>
       The only reason to contain a non-alphanumeric character (other than space) in a query is to use some "special" constraints.  Below is a list of such constraints:
@@ -211,12 +232,20 @@ function hideguide() {
           <tr><td>meta:cw</td><td>comment lives in a culture war thread</td></tr>
           <tr><td>meta:notcw</td><td>comment does <i>not</i> live in a culture war thread</td></tr>
           <tr><td colspan=2 style='text-align:left;'><hr>Interval Contraints:</td></tr>
-          <tr><td>time&lt;20200102</td><td>comment was created before January 2, 2020</td></tr>
+          <tr><td>time&lt;200102</td><td>comment was created before January 2, 2020</td></tr>
           <tr><td>score&gt;5</td><td>comment's score is over 5</td></tr>
           <tr><td>depth:0</td><td>comment is a  top-level comment</td></tr>
         </tbody>
       </table>
     </p>    
+  </div>
+
+  <div id='filterHelpDiv' style='display:none; margin-top:1em; background-color: #333; padding:1em; text-align:left; position:relative;'>
+    <h3>Dropped Results</h3>
+    <a style='position:absolute; right:0.5em; top:0.5em;' href="javascript:(hidehelp('filtered results'))">hide</a>
+    <p>
+      Despite the ominous name, this is actually quite innocent (if technical). After an initial retrieval stage, retrieved documents are passed through an additional filtering stage, which ensures results are accurate.  The main reason for results to be filtered is due to hash collisions.
+    </p>
   </div>
 
   <br>

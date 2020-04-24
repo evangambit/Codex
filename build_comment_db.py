@@ -23,6 +23,12 @@ conn.commit()
 
 D = []
 
+# As of Apr 23, 2020, only less than 500 comments have a score
+# beneath 17 and less than 500 have a score over 84.
+def getscore(comment):
+  score = comment.get('score', 0)
+  return min(-18, max(85, score))
+
 def get_tokens(text, links, json, parent, gparent, isthread, iscw):
   # Add comment's words to tokens.
   text = parser.text.lower()
@@ -45,10 +51,10 @@ def get_tokens(text, links, json, parent, gparent, isthread, iscw):
   # time2:   16 days
   # time3:   64 days
   # time4:  256 days
-  dt = comment['created_utc'] // (kSecsPerDay * 2)
+  dt = int(comment['created_utc'] // (kSecsPerDay))
   for i in range(5):
-    tokens.add('time{i}:' + str(dt))
-    dt = dt // 4
+    tokens.add(f'time{i}:' + str(dt))
+    dt //= 4
   tokens.add(f'year:{date.year}')
 
   # Add CW indicator
@@ -58,13 +64,15 @@ def get_tokens(text, links, json, parent, gparent, isthread, iscw):
   if not isthread:
     tokens.add(f'depth:{min(json["depth"], 20)}')
 
-  tokens.add(f'score:{comment.get("score", 0)}')
+  tokens.add(f'score:{getscore(comment)}')
 
   domains = set()
   for link in parser.links:
     loc = urlparse(link).netloc
     if loc[:4] == 'www.':
       loc = loc[4:]
+    elif loc[:3] == 'en.':
+      loc = loc[3:]
     domains.add(loc)
   for domain in domains:
     tokens.add(f'linksto:{domain}')
@@ -72,12 +80,12 @@ def get_tokens(text, links, json, parent, gparent, isthread, iscw):
   if parent:
     if 'author' in parent:
       tokens.add(f'pauthor:{parent["author"]}')
-    tokens.add(f'pscore:{parent.get("score", 0)}')
+    tokens.add(f'pscore:{getscore(parent)}')
 
   if gparent:
     if 'author' in gparent:
       tokens.add(f'pauthor:{gparent["author"]}')
-    tokens.add(f'pscore:{gparent.get("score", 0)}')
+    tokens.add(f'pscore:{getscore(gparent)}')
 
   return tokens
 
@@ -121,8 +129,6 @@ for thread in threads():
 
     tokens = get_tokens(parser.text, links, comment, parent, gparent, isthread=False, iscw=iscw)
     comment['tokens'] = ' '.join(tokens)
-
-    allscores.append(comment.get('score', 0))
 
     # Save some space -- all this information is in body_html anyway
     del comment['body']

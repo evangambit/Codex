@@ -32,11 +32,18 @@ class FindAndBoldTermsHTMLParser(HTMLParser):
     self.html += f'</{tag}>'
 
   def handle_data(self, data):
+    if 'Apple Inc' in data:
+      print('====' * 9)
+      print(data)
     for term in self.terms:
-      pattern = f"[^\\w\\d]({term})[^\\w\\d]"
       data = re.sub(
-        re.compile(pattern, re.IGNORECASE),
+        re.compile(f"[^\\w\\d]({term})[^\\w\\d]", re.IGNORECASE),
         r" <span class='term'>\1</span> ",
+        data,
+      )
+      data = re.sub(
+        re.compile(f"^({term})[^\\w\\d]", re.IGNORECASE),
+        r"<span class='term'>\1</span> ",
         data,
       )
     self.html += data
@@ -69,16 +76,17 @@ class MyServer(http.server.BaseHTTPRequestHandler):
     start_time = time.time()
     print(f'search {args}')
     query_text = ' ' + unquote(args.get('query', [''])[0])
-    tokens = re.sub(r"[^\w\d:\.\-_]+", " ", query_text).split(' ')
-    tokens = [t for t in tokens if len(t.strip()) > 0]
 
     kMaxResults = 100
-    query_result = query(c, tokens, max_results = kMaxResults+1)
+    query_result = query(c, query_text, max_results = kMaxResults+1)
     if query_result is str:
       self.send_error(500, query_result)
       return
 
-    boulder.terms = set([t for t in tokens if ':' not in t])
+    tokens = query_result['tokens']
+
+    boulder.terms = set([t for t in tokens if (':' not in t) and (t not in '()+')])
+    print(boulder.terms)
     for i in range(len(query_result['comments'])):
       comment = query_result['comments'][i]
       comment['subreddit'] = 'slatestarcodex' if 'slatestarcodex' in comment['permalink'] else 'TheMotte'

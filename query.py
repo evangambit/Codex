@@ -4,6 +4,7 @@ from utils import *
 pjoin = os.path.join
 
 from union import Intersection, Union, FileIterator
+from expression_parser import str2tree, tokenize
 
 dirname = 'score'
 kNumTokens = 16384
@@ -18,11 +19,12 @@ def _words2tokens(words):
     bad = json.load(f)
   words = [t for t in set(words) if t not in bad]
 
+  # Lower-case word tokens
+  words = [w if ':' in w else w.lower() for w in words]
+
   tokens = [h(t) % kNumTokens for t in words]
   tokens = [pad(hex(t)[2:], n=5, c='0') for t in tokens]
   tokens = list(tokens)
-
-  print(tokens)
 
   # If there are more than 12 tokens, drop the most common.
   # 16 is probably too large if most tokens are rare, but
@@ -53,54 +55,73 @@ class ListFetcher:
         FileIterator(pjoin(dirname, 'allposts.list'))
       )
 
-# TODO: support range queries.
+def query_to_tree(query_text):
+  tokens = tokenize(query_text)
+  tokens = [(t if t.lower() != 'or' else '+') for t in tokens]
 
-def query(c, tokens, max_results=64, merger='AND'):
-  assert merger in ['AND', 'OR']
+  # Clip depth/score tokens.
+  for i, t in enumerate(tokens):
+    if t[:6] == 'depth:':
+      tokens[i] = f'depth:{min(int(t[6:]), 20)}'
+    elif t[:6] == 'score:':
+      tokens[i] = f'score:{max(min(int(t[6:]), 85), -18)}'
+
+  return tokens, str2tree(tokens)
+
+def expressiontree_to_uniontree(tree):
+  if tree.op not in '+*':
+    token = _words2tokens([tree.op])[0]
+    return FileIterator(pjoin('index', dirname, token + '.list'))
+
+  children = [expressiontree_to_uniontree(c) for c in tree.children]
+  if tree.op == '+':
+    return Union(*children)
+  else:
+    return Intersection(*children)
+
+def query(c, query_text, max_results=64):
+  if re.findall(r"[^0-9a-zA-Z_\-: \.\+\(\)]+", query_text):
+    return f'"{query_text}" contains invalid characters'
+
+  tokens, expression_tree = query_to_tree(query_text)
+  union_tree = expressiontree_to_uniontree(expression_tree)
+
+  print(expression_tree)
+  print(union_tree.name())
+  print(tokens)
+
+  # lists = ListFetcher(pjoin('index', dirname), tokens)
+
+  # merger = Intersection(*lists.files)
+
+  # for candidate in merger:
   matches = []
   num_excluded = 0
-
-  tokens = list(set(tokens))
-
-  # TODO: convert word-tokens to lowercase.
-
-  # Process depth tokens
-  depthTokens = [t for t in tokens if t[:6] == 'depth:']
-  if len(depthTokens) > 1:
-    return 'Query contains mutually exclusive depth constraints.'
-  for t in depthTokens:
-    del tokens[tokens.index(t)]
-  # Make sure depths are integers
-  for t in depthTokens:
-    try:
-      int(t[6:])
-    except:
-      return 'Query contains non-integer depth constraint'
-  # Clip at 10, dedup, and add back to tokens
-  tokens += list(set([f'depth:{min(int(t[6:]), 20)}' for t in depthTokens]))
-  
-  lists = ListFetcher(pjoin('index', dirname), tokens)
-
-  merger = Intersection(*lists.files)
-
-  for candidate in merger:
+  for candidate in union_tree:
     id_ = int(candidate[8:], 36)
     c.execute(f"SELECT json FROM comments WHERE id={id_}")
     j = json.loads(c.fetchone()[0])
-    index_tokens = j['tokens'].split(' ')
-    if len([t for t in tokens if t in index_tokens]) != len(tokens):
+
+    index_tokens = {}
+    for t in j['tokens'].split(' '):
+      index_tokens[t] = 1
+
+    if expression_tree.eval(index_tokens) == 0:
       num_excluded += 1
       continue
-    if len(depthTokens) > 0:
-      if j['depth'] != int(depthTokens[0][6:]):
-        num_excluded += 1
-        continue
+
+    # TODO: depth/score tokens should be unclipped here.
     matches.append(j)
     if len(matches) >= max_results:
       break
+
+  # for m in matches:
+  #   m['body_html'] = m['tokens']
+
   return {
     "comments": matches,
-    "num_excluded": num_excluded
+    "num_excluded": num_excluded,
+    'tokens': tokens
   }
 
 if __name__ == '__main__':
