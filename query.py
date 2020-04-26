@@ -3,7 +3,7 @@ from datetime import datetime
 from utils import *
 pjoin = os.path.join
 
-from union import Intersection, Union, FileIterator
+from union import FileINode, AndINode, OrINode
 from expression_parser import str2tree, tokenize
 
 dirname = 'score'
@@ -47,16 +47,18 @@ class ListFetcher:
     self.files = []
     for token in _words2tokens(words):
       self.files.append(
-        FileIterator(pjoin(dirname, token + '.list'))
+        FileINode(pjoin(dirname, token + '.list'))
       )
 
     if len(self.files) == 0:
       self.files.append(
-        FileIterator(pjoin(dirname, 'allposts.list'))
+        FileINode(pjoin(dirname, 'allposts.list'))
       )
 
 def query_to_tree(query_text):
   tokens = tokenize(query_text)
+
+  # tokens = tokenize(query_text)
   tokens = [(t if t.lower() != 'or' else '+') for t in tokens]
 
   # Clip depth/score tokens.
@@ -71,13 +73,13 @@ def query_to_tree(query_text):
 def expressiontree_to_uniontree(tree):
   if tree.op not in '+*':
     token = _words2tokens([tree.op])[0]
-    return FileIterator(pjoin('index', dirname, token + '.list'))
+    return FileINode(pjoin('index', dirname, token + '.list'))
 
   children = [expressiontree_to_uniontree(c) for c in tree.children]
   if tree.op == '+':
-    return Union(*children)
+    return OrINode(*children)
   else:
-    return Intersection(*children)
+    return AndINode(*children)
 
 def query(c, query_text, max_results=64):
   if re.findall(r"[^0-9a-zA-Z_\-: \.\+\(\)]+", query_text):
@@ -115,8 +117,8 @@ def query(c, query_text, max_results=64):
     if len(matches) >= max_results:
       break
 
-  # for m in matches:
-  #   m['body_html'] = m['tokens']
+  for m in matches:
+    m['body_html'] = m['tokens']
 
   return {
     "comments": matches,

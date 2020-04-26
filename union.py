@@ -1,389 +1,255 @@
-import copy, math
+import copy, heapq, math
 
+kFirstString = ''
+kLastString = '~'
+
+"""
+Subclasses should create a (string) member variable named
+"currentVal".
+
+Nodes should not contain any valid values until after
+"step()" has been called.  Before this nodes should return
+kFirstString.
+
+The user should *not* try to iterate *and* retrieve on the
+same tree.
+"""
 class IterableNode:
-    def __init__(self):
-        pass
-    def __iter__(self):
-        raise Exception('not yet implemented')
-    def children(self):
-        return []
-    def is_leaf(self):
-        return len(self.children()) == 0
-    def name(self):
-        raise Exception('not yet implemented')
-    # Expected time it takes to emit one entry.
-    def speed(self):
-        raise Exception('not yet implemented')
-    def height(self):
-        if self.is_leaf():
-            return 0
-        return max([x.height() for x in self.children()]) + 1
+  def __init__(self):
+    self.currentVal = kFirstString
+  def step(self):
+    raise NotImplementedError('Subclasses must implement this method')
+  def children(self):
+    return []
+  def is_leaf(self):
+    return len(self.children()) == 0
+  def name(self):
+    raise NotImplementedError('Subclasses must implement this method')
+  # Expected time it takes to emit one entry.
+  def speed(self):
+    raise NotImplementedError('Subclasses must implement this method')
+  def retrieve(self, num_results):
+    results = []
+    self.step()
+    while self.currentVal != kLastString:
+      results.append(self.currentVal)
+      if len(results) >= num_results:
+        break
+      self.step()
+    return results
+  def __lt__(a, b):
+    return a.currentVal < b.currentVal
+  def __iter__(self):
+    self.step()
+    while self.currentVal != kLastString:
+      yield self.currentVal
+      self.step()
 
-class EmptyINode:
-    def __init__(self):
-        pass
-    def __iter__(self):
-        return
-    def name(self):
-        return '0'
-    def speed(self):
-        return 0
+class EmptyINode(IterableNode):
+  def __init__(self):
+    super().__init__()
+  def step(self):
+    self.currentVal = kLastString
+  def name(self):
+    return '0'
+  def speed(self):
+    return 0
 
 kLineLength = 16
-class FileIterator:
-    def __init__(self, path):
-        self.path = path
-    def __iter__(self):
-        with open(self.path, 'r') as f:
-            while True:
-                line = f.read(kLineLength).strip()
-                if len(line) == 0:
-                    return
-                yield line
-    def name(self):
-        return self.path
-    def is_leaf(self):
-        return True
-    def speed(self):
-        return 0.5
+class FileINode(IterableNode):
+  def __init__(self, path):
+    super().__init__()
+    self.path = path
+    self.f = open(self.path, 'r')
+  def step(self):
+    self.currentVal = self.f.read(kLineLength)
+    if len(self.currentVal) == 0:
+      self.currentVal = kLastString
+  def name(self):
+    return self.path
+  def speed(self):
+    return 0.5
 
-class Union(IterableNode):
-    @staticmethod
-    def create(*iterables):
-        assert len(iterables) > 0
-        if len(iterables) == 1:
-            return iterables[0]
-        iterables = list(set(iterables))
-        childNames = [strip_parentheses(x.name()) for x in iterables]
-        childNames = list(childNames)
-        # Remove children that are unnecessary.
-        # For example: "AB + A = A"
-        obselete = set()
-        for i, child1 in enumerate(childNames):
-            for j in range(i + 1, len(childNames)):
-                child2 = childNames[j]
-                if child1 in child2:
-                    obselete.add(j)
-                elif child2 in child1:
-                    obselete.add(i)
-        iterables = [iterables[i] for i in range(len(iterables)) if i not in obselete]
-        return Union(*iterables)
-
-    def __init__(self, *iterables):
-        # Dedup inputs
-        names = set([x.name() for x in iterables])
-        self.iterables = []
-        for it in iterables:
-            n = it.name()
-            if n in names:
-                names.remove(n)
-                self.iterables.append(it)
-    
-    def __iter__(self):
-        iters = [iter(x) for x in self.iterables]
-        vals = [next(it) for it in iters]
-        while True:
-            while None in vals:
-                i = vals.index(None)
-                vals = vals[:i] + vals[i+1:]
-                iters = iters[:i] + iters[i+1:]
-            if len(vals) == 0:
-                return
-            r = min(vals)
-            yield r
-            for i, val in enumerate(vals):
-                if val == r:
-                    try:
-                        vals[i] = next(iters[i])
-                    except StopIteration:
-                        vals[i] = None
-    
-    def children(self):
-        return self.iterables
-
-    # There is a small penalty based on the number of lists.
-    # This can safely be ignored when there are less than 100
-    # lists though, so we ignore it here.
-    def speed(self):
-        return 0.99 * sum((x.speed() for x in self.iterables)) / len(self.iterables)
-    
-    def name(self):
-        A = [x.name() for x in self.children()]
-        A.sort()
-        return '(' + '+'.join(A) + ')'
-
-class Intersection(IterableNode):
-    @staticmethod
-    def create(*iterables):
-        assert len(iterables) > 0
-        if len(iterables) == 1:
-            return iterables[0]
-        iterables = list(set(iterables))
-        childNames = [strip_parentheses(x.name()) for x in iterables]
-        childNames = list(childNames)
-        # Remove children that are unnecessary.
-        # For example: "AB + A = A"
-        obselete = set()
-        for i, child1 in enumerate(childNames):
-            for j in range(i + 1, len(childNames)):
-                child2 = childNames[j]
-                if child2 in child1:
-                    obselete.add(j)
-                elif child1 in child2:
-                    obselete.add(i)
-        iterables = [iterables[i] for i in range(len(iterables)) if i not in obselete]
-        return Intersection(*iterables)
-
-    def __init__(self, *iterables):
-        # Dedup inputs
-        names = set([x.name() for x in iterables])
-        self.iterables = []
-        for it in iterables:
-            n = it.name()
-            if n in names:
-                names.remove(n)
-                self.iterables.append(it)
-    
-    def __iter__(self):
-        iters = [iter(x) for x in self.iterables]
-        vals = [next(it) for it in iters]
-        while True:
-            while None in vals:
-                i = vals.index(None)
-                vals = vals[:i] + vals[i+1:]
-                iters = iters[:i] + iters[i+1:]
-            if len(vals) == 0:
-                return
-            r = max(vals)
-            for i, val in enumerate(vals):
-                while val < r:
-                    try:
-                        val = next(iters[i])
-                    except StopIteration:
-                        return
-                vals[i] = val
-            if sum(v == r for v in vals) == len(vals):
-                yield r
-                for i, val in enumerate(vals):
-                    try:
-                        vals[i] = next(iters[i])
-                    except StopIteration:
-                        return
-
-    def children(self):
-        return self.iterables
-
-    def speed(self):
-        return 0.5 * prod([x.speed() for x in self.iterables])
-    
-    def name(self):
-        A = [x.name() for x in self.children()]
-        A.sort()
-        return '(' + '*'.join(A) + ')'
-
-def prod(A):
-    r = 1
-    for a in A:
-        r *= a
-    return r
-
-class Wrapper(IterableNode):
-    def __init__(self, name, arr):
-        self._name = name
-        self.arr = arr
-    def __iter__(self):
-        return iter(self.arr)
-    def name(self):
-        return self._name
-    def speed(self):
-        return 0.5
-
-# Creates a binary tree with multiplication nodes at the
-# bottom and addition nodes at the top.
-def _foil(tree):
-    if tree.is_leaf():
-        return tree
-    assert isinstance(tree, Union) or isinstance(tree, Intersection)
-    children = tree.children()
-    if isinstance(tree, Intersection):
-        is_union = [isinstance(c, Union) for c in children]
-        if True in is_union:
-            i = is_union.index(True)
-            A = children[:i] + children[i+1:]
-            B = []
-            for c in children[i].children():
-                for a in A:
-                    B.append(_foil(Intersection(c, a)))
-            return Union.create(*B)
-    return tree
-
-def strip_parentheses(x):
-    if x[0] == '(' and x[-1] == ')':
-        return x[1:-1]
+"""
+A simple node that iterates over a list of strings. Used
+for testing.
+"""
+class ListINode(IterableNode):
+  def __init__(self, arr):
+    super().__init__()
+    self.arr = arr
+    self.idx = -1
+    self.id = 'list:' + str(ListINode.id)
+    ListINode.id += 1
+  def step(self):
+    self.idx += 1
+    if self.idx < len(self.arr):
+      self.currentVal = self.arr[self.idx]
     else:
-        return x
+      self.currentVal = kLastString
+      
+  def name(self):
+    return self.id
+  def speed(self):
+    return 0
+ListINode.id = 0
 
-def foil(tree):
+"""
+This is a generalization of the "And" and "Or" IterableNodes.
 
-    oldname = None
-    newname = tree.name()
-    while newname != oldname:
-        tree = _foil(tree)
-        oldname = newname
-        newname = tree.name()
+It is, however, marginally less efficient (and noticably
+less readable) than the And/Or nodes, so we prefer using
+And/Or nodes when possible.
+"""
+class AtLeastINode(IterableNode):
+  # Automatically return an EmptyINode if there are no
+  # children.
+  def __new__(cls, k, *children):
+    if len(children) == 0:
+      return EmptyINode()
+    return object.__new__(cls)
 
-    # Make tree flatter (i.e. less binary)
-    def flatten(node):
-        if node.is_leaf():
-            return node
-        children = node.children()
-        if isinstance(node, Intersection):
-            C = []
-            for child in children:
-                if isinstance(child, Intersection):
-                    C += [flatten(x) for x in child.iterables]
-                else:
-                    C.append(flatten(child))
-            return Intersection.create(*C)
-        if isinstance(node, Union):
-            C = []
-            for child in children:
-                if isinstance(child, Union):
-                    C += [flatten(x) for x in child.iterables]
-                else:
-                    C.append(flatten(child))
-            return Union.create(*C)
-        assert False
-    oldname = None
-    newname = tree.name()
-    while newname != oldname:
-        tree = flatten(tree)
-        oldname = newname
-        newname = tree.name()
-    
-    # The tree should now have a depth of 3, with one union
-    # node parenting multiple intersection nodes, and the
-    # intersection nodes having leaves as children.  If this
-    # is not true.  The only alternative is that the expression
-    # is even simpler, containing at most one non-leaf node.
-    assert tree.height() < 3, f"A foiled tree's height should be less than 3, but this one's is {tree.height()}"
-
-    if tree.height() < 2:
-        return tree
-    
-    assert isinstance(tree, Union)
-    for child in tree.children():
-        assert isinstance(child, Intersection) or child.is_leaf()
-
-
-    return tree
-
-# Cache is a map from a name to the tree that most efficiently
-# represents that expression.  For instance
-# cache["(a+b)*(c+d)"] = "(a+b)*(c+d)"
-# cache["(a*c)+(a*d)+(b*c)+(b*d)"] = "(a+b)*(c+d)"
-def simplify(tree, cache=None):
-    if not isinstance(tree, Union):
-        return tree
-    if cache is None:
-        cache = {}
-    elif tree.name() in cache:
-        return cache[tree.name()]
-
-    children = tree.children()
-
-    child2leaves = {}
+  def __init__(self, k, *children):
+    super().__init__()
+    if type(k) is not int:
+      raise TypeError('k must be an integer')
+    if k < 1:
+      raise ValueError('k cannot be less than 1')
+    if k > len(children):
+      raise ValueError('k cannot exceed the number of children')
+    self.k = k
+    # Dedup 'children' and construct self._children
+    self._children = []
+    names = set()
     for child in children:
-        if child.is_leaf():
-            child2leaves[child] = child
-        else:
-            child2leaves[child] = child.children()
-        
-    leaf2children = {}
-    for child in child2leaves:
-        for leaf in child2leaves[child]:
-            if leaf not in leaf2children:
-                leaf2children[leaf] = []
-            leaf2children[leaf].append(child)
+      n = child.name()
+      if n not in names:
+        names.add(n)
+        self._children.append(child)
 
-    # Every leaf that occurs in at least 2 children is a
-    # candidate for being factored out.  We try every
-    # possible factoring and evaluate it.
+  def _min(self):
+    A = [c.currentVal for c in self._children]
+    low = min(A)
+    return low, A.index(low)
 
-    best = tree
-    bestSpeed = tree.speed()
+  def step(self):
+    # Increment the smallest self.k children.
+    V = [x.currentVal for x in self._children]
+    V.sort()
+    threshold = V[self.k - 1]
+    for child in self._children:
+      if child.currentVal <= threshold:
+        child.step()
+    # Keep incrementing until the bottom k children match.
+    low, idx = self._min()
+    while sum([c.currentVal == low for c in self._children]) < self.k:
+      self._children[idx].step()
+      low, idx = self._min()
+    if low == kFirstString:
+      self.step()
+    else:
+      self.currentVal = low
 
-    for leaf in leaf2children:
-        childrenWithLeaf = leaf2children[leaf]
-        if len(childrenWithLeaf) == 1:
-            continue
-        A, B = [], []
-        for c in children:
-            if c in childrenWithLeaf:
-                if isinstance(c, Intersection):
-                    C = copy.copy(c.children())
-                    del C[C.index(leaf)]
-                    A.append(Intersection.create(*C))
-            else:
-                B.append(c)
-        if len(A) == 0:
-            continue
-        B.append(
-            Intersection.create(leaf, Union.create(*A))
-        )
-        candidate = Union.create(*B)
-        candidate = simplify(candidate, cache)
-        s = candidate.speed()
-        if s > bestSpeed:
-            best = candidate
-            bestSpeed = s
-    
-    cache[tree.name()] = best
+  def children(self):
+    return self._children
 
-    return best
-
-if __name__ == '__main__':
-    import numpy as np
-    A = np.random.randint(0, 100, 30)
-    B = np.random.randint(0, 100, 30)
-    C = np.random.randint(0, 100, 30)
-    D = np.random.randint(0, 100, 30)
-
+  # TODO: make this more accurate.
+  def speed(self):
+    raise NotImplementedError()
+    return 0.1 * prod([x.speed() for x in self.iterables])
+  
+  def name(self):
+    A = [x.name() for x in self.children()]
     A.sort()
-    B.sort()
-    C.sort()
-    D.sort()
+    return '(' + '*'.join(A) + ')'
 
-    A = Wrapper('A', A)
-    B = Wrapper('B', B)
-    C = Wrapper('C', C)
-    D = Wrapper('D', D)
+class AndINode(IterableNode):
+  # Automatically return an EmptyINode if there are no
+  # children.
+  def __new__(cls, *children):
+    if len(children) == 0:
+      return EmptyINode()
+    return object.__new__(cls)
 
-    # a (a + c) = aa + ac
-    # tree = Intersection.create(Union(A, B), Union(A, C))
+  def __init__(self, *children):
+    super().__init__()
+    # Dedup 'children' and construct self._children
+    self._children = []
+    names = set()
+    for child in children:
+      n = child.name()
+      if n not in names:
+        names.add(n)
+        self._children.append(child)
 
-    # (a + b) (a + c) = aa + ac + ab + bc
-    # tree = Intersection.create(Union(A, B), Union(A, C))
+  def step(self):
+    # The current children all point to self.currentVal,
+    # which is the last value we just emitted.  So we
+    # increment all children one.
+    for child in self._children:
+        child.step()
+    # Now we keep incrementing children until they all equal
+    # the largest child.
+    high = max([c.currentVal for c in self._children])
+    while True:
+      for child in self._children:
+        while child.currentVal < high:
+          child.step()
+      if sum([c.currentVal == high for c in self._children]) == len(self._children):
+        self.currentVal = high
+        return
+      high = max([c.currentVal for c in self._children])
 
-    # (a + b) (a + c) = aa + ac + ab + bc
-    # tree = Intersection.create(Union(A, B), Union(A, C, D))
+  def children(self):
+    return self._children
 
-    # (BC) + (ABCD)
-    # tree = Union.create(
-    #     Intersection(B, C),
-    #     Intersection(A, B, C, D)
-    # )
+  # TODO: make this more accurate.
+  def speed(self):
+    raise NotImplementedError()
+    return 0.1 * prod([x.speed() for x in self.iterables])
+  
+  def name(self):
+    A = [x.name() for x in self.children()]
+    A.sort()
+    return '(' + '*'.join(A) + ')'
 
-    # a * b * (c + d)
-    # tree = Intersection.create(Union(A, B), Union(A, C))
+class OrINode(IterableNode):
+  # Automatically return an EmptyINode if there are no
+  # children.
+  def __new__(cls, *children):
+    if len(children) == 0:
+      return EmptyINode()
+    return object.__new__(cls)
 
-    tree = Intersection.create(Intersection(A, B), Union(C, D))
+  def __init__(self, *children):
+    super().__init__()
+    # Dedup 'children' and construct self._children
+    self._children = []
+    names = set()
+    for child in children:
+      n = child.name()
+      if n not in names:
+        names.add(n)
+        heapq.heappush(self._children, child)
 
-    print(tree.speed(), strip_parentheses(tree.name()))
-    tree = foil(tree)
-    print(tree.speed(), strip_parentheses(tree.name()))
-    tree = simplify(tree)
-    print(tree.speed(), strip_parentheses(tree.name()))
+  def step(self):
+    newVal = self.currentVal
+    while newVal == self.currentVal:
+      child = heapq.heappop(self._children)
+      child.step()
+      heapq.heappush(self._children, child)
+      newVal = self._children[0].currentVal
+    self.currentVal = newVal
 
-    # print(tree1.name())
-    # print(tree2.name())
+  def children(self):
+    return self._children
+
+  # TODO: make this more accurate.
+  def speed(self):
+    raise NotImplementedError()
+    return 0.1 * prod([x.speed() for x in self.iterables])
+  
+  def name(self):
+    A = [x.name() for x in self.children()]
+    A.sort()
+    return '(' + '*'.join(A) + ')'
