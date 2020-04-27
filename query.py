@@ -125,8 +125,3 @@ def query(c, query_text, max_results=64):
     "num_excluded": num_excluded,
     'tokens': tokens
   }
-
-if __name__ == '__main__':
-  conn = sqlite3.connect('comments.db')
-  c = conn.cursor()
-  a = query(c, ['author:ralf_', 'humans'], 3)

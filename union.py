@@ -17,6 +17,7 @@ same tree.
 class IterableNode:
   def __init__(self):
     self.currentVal = kFirstString
+    self.negate = False
   def step(self):
     raise NotImplementedError('Subclasses must implement this method')
   def children(self):
@@ -75,11 +76,12 @@ A simple node that iterates over a list of strings. Used
 for testing.
 """
 class ListINode(IterableNode):
-  def __init__(self, arr):
+  def __init__(self, arr, negate=False):
     super().__init__()
     self.arr = arr
     self.idx = -1
     self.id = 'list:' + str(ListINode.id)
+    self.negate = negate
     ListINode.id += 1
   def step(self):
     self.idx += 1
@@ -87,7 +89,6 @@ class ListINode(IterableNode):
       self.currentVal = self.arr[self.idx]
     else:
       self.currentVal = kLastString
-      
   def name(self):
     return self.id
   def speed(self):
@@ -125,7 +126,10 @@ class AtLeastINode(IterableNode):
       n = child.name()
       if n not in names:
         names.add(n)
-        self._children.append(child)
+        if child.negate:
+          self._children.append(_ExplicitNegatedNode(child))
+        else:
+          self._children.append(child)
 
   def _min(self):
     A = [c.currentVal for c in self._children]
@@ -153,15 +157,55 @@ class AtLeastINode(IterableNode):
   def children(self):
     return self._children
 
-  # TODO: make this more accurate.
+  # TODO: what parameter should I use instead of 0.1?
   def speed(self):
-    raise NotImplementedError()
-    return 0.1 * prod([x.speed() for x in self.iterables])
+    a = math.pow(0.1, len(self.k))
+    b = sum([x.speed() for x in self._children])
+    return a * b / len(self._children)
   
   def name(self):
     A = [x.name() for x in self.children()]
     A.sort()
     return '(' + '*'.join(A) + ')'
+
+"""
+The normal way to implement negation is to iterate over
+allposts.json and remove a node's lines from it.
+
+However, a negated node can be implemented more efficiently
+if it is the AndINode's child.  Since this is by far the
+most common use of negation, it's worth making our code
+terrible if it allows us to support it.
+
+As part of this, '_ExplicitNegatedNode' is a protected
+class that should only be used by OrINode and AtLeastINode
+"""
+class _ExplicitNegatedNode(IterableNode):
+  def __init__(self, child):
+    super().__init__()
+    self.all = _ExplicitNegatedNode.allnode(None)
+    self.child = child
+  def step(self):
+    self.all.step()
+    while True:
+      if self.all.currentVal == kLastString:
+        self.currentVal = kLastString
+        break
+      if self.child.currentVal == self.all.currentVal:
+        self.all.step()
+        self.child.step()
+      elif self.child.currentVal < self.all.currentVal:
+        self.child.step()
+      else:
+        self.currentVal = self.all.currentVal
+        break
+  def children(self):
+    return [self.child, self.all]
+  def speed(self):
+    return self.child.speed()
+  def name(self):
+    return '-' + self.child.name()
+_ExplicitNegatedNode.allnode = lambda x: FileINode('index/score/allposts.json')
 
 class AndINode(IterableNode):
   # Automatically return an EmptyINode if there are no
@@ -169,6 +213,11 @@ class AndINode(IterableNode):
   def __new__(cls, *children):
     if len(children) == 0:
       return EmptyINode()
+    if len(children) == 1:
+      if not children[0].negate:
+        return children[0]
+      else:
+        return ExplicitNegatedNode(children[0])
     return object.__new__(cls)
 
   def __init__(self, *children):
@@ -181,32 +230,47 @@ class AndINode(IterableNode):
       if n not in names:
         names.add(n)
         self._children.append(child)
+    self._hasnegation = sum([c.negate for c in self._children])
 
   def step(self):
+    if sum([c.currentVal == kLastString for c in self._children if not c.negate]):
+      self.currentVal = kLastString
+      return
     # The current children all point to self.currentVal,
     # which is the last value we just emitted.  So we
     # increment all children one.
     for child in self._children:
+      if not child.negate:
         child.step()
+
     # Now we keep incrementing children until they all equal
     # the largest child.
-    high = max([c.currentVal for c in self._children])
+    high = max([c.currentVal for c in self._children if not c.negate])
     while True:
       for child in self._children:
         while child.currentVal < high:
           child.step()
-      if sum([c.currentVal == high for c in self._children]) == len(self._children):
+      high = max([c.currentVal for c in self._children if not c.negate])
+      if sum([(c.currentVal == high) != (c.negate) for c in self._children]) == len(self._children):
         self.currentVal = high
         return
-      high = max([c.currentVal for c in self._children])
+      if sum([c.currentVal >= high for c in self._children]) == len(self._children):
+        for child in self._children:
+          child.step()
+      high = max([c.currentVal for c in self._children if not c.negate])
+      if high == kLastString:
+        self.currentVal = kLastString
+        return
+
 
   def children(self):
     return self._children
 
-  # TODO: make this more accurate.
+  # TODO: what parameter should I use instead of 0.1?
   def speed(self):
-    raise NotImplementedError()
-    return 0.1 * prod([x.speed() for x in self.iterables])
+    a = math.pow(0.1, len(self._children))
+    b = sum([x.speed() for x in self._children])
+    return a * b / len(self._children)
   
   def name(self):
     A = [x.name() for x in self.children()]
@@ -230,24 +294,31 @@ class OrINode(IterableNode):
       n = child.name()
       if n not in names:
         names.add(n)
-        heapq.heappush(self._children, child)
+        if child.negate:
+          heapq.heappush(self._children, _ExplicitNegatedNode(child))
+        else:
+          heapq.heappush(self._children, child)
+    self._hasnegation = sum([c.negate for c in self._children])
 
   def step(self):
-    newVal = self.currentVal
-    while newVal == self.currentVal:
-      child = heapq.heappop(self._children)
-      child.step()
-      heapq.heappush(self._children, child)
-      newVal = self._children[0].currentVal
-    self.currentVal = newVal
+    if not self._hasnegation:
+      newVal = self.currentVal
+      while newVal == self.currentVal:
+        child = heapq.heappop(self._children)
+        child.step()
+        heapq.heappush(self._children, child)
+        newVal = self._children[0].currentVal
+      self.currentVal = newVal
+    else:
+      raise NotImplementedError('TODO')
 
   def children(self):
     return self._children
 
   # TODO: make this more accurate.
   def speed(self):
-    raise NotImplementedError()
-    return 0.1 * prod([x.speed() for x in self.iterables])
+    S = [x.speed() for x in self._children]
+    return sum(S) / len(self._children)
   
   def name(self):
     A = [x.name() for x in self.children()]
