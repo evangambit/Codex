@@ -109,8 +109,19 @@ const comments = {{{comments}}};
 
 const kMaxCommentHeight = 384;
 
+function copy2clipboard(text) {
+  let textarea = document.createElement('TEXTAREA');
+  // textarea.style.display = 'none';
+  document.body.appendChild(textarea);
+  textarea.value = text;
+  textarea.select();
+  textarea.setSelectionRange(0, 99999);
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+}
+
 function foo(mod, reportee, url) {
-  alert('u/' + mod + ' banned u/' + reportee + ' for 0 ([context](' + url + '))')
+  copy2clipboard('u/' + mod + ' banned u/' + reportee + ' for 0 ([context](' + url + '))');
 }
 
 window.onkeydown = (e) => {
@@ -272,13 +283,10 @@ function hidehelp(type) {
       <div style='flex:1'></div>
       <div class="utc">{{created_utc}}</div>
       <div style='flex:1'></div>
-      <div>{{pauthor}}</div>
-      <div style='flex:1'></div>
       <div>
         <button onclick="foo('{{author}}', '{{pauthor}}', 'https://www.reddit.com{{{permalink}}}')">cpy</button>
       </div>
     </div>
-    <!-- <div>{{{tokens}}}</div><hr> -->
     <div class='commentBodyDiv'>
       {{{body_html}}}
     </div>

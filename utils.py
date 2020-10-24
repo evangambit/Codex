@@ -149,8 +149,8 @@ def get_tokens(comment, parent, gparent, thread, isthread):
 
   if gparent:
     if 'author' in gparent:
-      tokens.add(f'pauthor:{gparent["author"].lower()}')
-    tokens.add(f'pscore:{getscore(gparent)}')
+      tokens.add(f'gauthor:{gparent["author"].lower()}')
+    tokens.add(f'gscore:{getscore(gparent)}')
 
   if 'distinguished' in comment and comment['distinguished'] is not None:
     if comment['distinguished'] != 'moderator':

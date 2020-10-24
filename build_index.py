@@ -16,8 +16,11 @@ lasttime = time.time()
 
 ids = set()
 allscores = []
-for thread in threads():
+for thread in threads(years=['2020']):
   comments = thread['comments']
+
+  if comment_insertions > 20000:
+    break
 
   id2comment = {}
   for comment in comments:
@@ -33,12 +36,16 @@ for thread in threads():
 
     depth = 0
     parent = id2comment.get(comment['parent_id'][3:], None)
-    gparent = None
     if parent:
       depth += 1
-      while parent['parent_id'][3:] in id2comment:
+      gparent = id2comment.get(parent['parent_id'][3:], None)
+      ancestor = gparent
+      while ancestor and (ancestor['parent_id'][3:] in id2comment):
         depth += 1
-        parent = id2comment.get(parent['parent_id'][3:], None)
+        ancestor = id2comment.get(ancestor['parent_id'][3:], None)
+    else:
+      gparent = None
+
     comment['depth'] = depth
 
     tokens = get_tokens(comment, parent, gparent, thread, isthread=False)
