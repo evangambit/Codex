@@ -166,7 +166,7 @@ class Reddit:
     self.appid = self.secret['appid']
     self.appsecret = self.secret['appsecret']
     self.useragent = self.secret['useragent']
-    self.throttler = Throttler(0.45)
+    self.throttler = Throttler(0.4)
 
     self.expiresAt = 0
     self.authenticate()
@@ -226,6 +226,8 @@ class Reddit:
       response = self.request(kBaseUrl + f'&after=t3_{R[-1]["id"]}')
       assert response['kind'] == 'Listing'
       submissions = response['data']['children']
+      if len(submissions) == 0:
+        break
       for i, submission in enumerate(submissions):
         assert submission['kind'] == 't3'
         assert submission['data']['id'] not in seenit
@@ -286,7 +288,11 @@ if __name__ == '__main__':
 
   # r/TheMotte is typically very slow per comment on account of its habit
   # of having threads with over 400 comments.
-  for subreddit in ['TheMotte', 'slatestarcodex']:
+  for subreddit in [
+    # 'TheMotte',
+    # 'slatestarcodex',
+    'theschism'
+    ]:
     # Grab all posts within the last time period
     S = reddit.new_submissions(subreddit, max_age=kSecsPerDay*14)
 
@@ -331,10 +337,11 @@ if __name__ == '__main__':
 
       if os.path.exists(pjoin(kOutDir, year, fn)):
        with open(pjoin(kOutDir, year, fn), 'r') as f:
-          old = json.load(f)
+        old = json.load(f)
       else:
         old = {'comments': []}
 
+      # Copy over old comments.
       for c in old['comments']:
         if c['id'] not in submission.comments:
           submission.comments[c['id']] = c

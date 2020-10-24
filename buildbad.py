@@ -1,16 +1,15 @@
 import json, sqlite3
 
-conn = sqlite3.connect('comments.db')
+conn = sqlite3.connect('new.db')
 c = conn.cursor()
 
-c.execute('SELECT * FROM comments')
+c.execute('SELECT json FROM comments')
 
 F = {}
 
-n = 400000
+n = 100000
 for it in range(n):
-  _, jsontext = c.fetchone()
-  j = json.loads(jsontext)
+  j = json.loads(c.fetchone()[0])
   for token in j['tokens'].split(' '):
     F[token] = F.get(token, 0) + 1
 

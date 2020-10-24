@@ -1,127 +1,185 @@
-import json, os, sys, time
-from datetime import datetime
 from utils import *
-pjoin = os.path.join
+from expression_parser import query_to_tree
 
-from union import FileINode, AndINode, OrINode
-from expression_parser import str2tree, tokenize
+from urllib.parse import urlparse
+import time
 
-dirname = 'score'
-kNumTokens = 16384
+kMaxVal = (float('-inf'), 0)
+kDefaultLimit = 1000
+kDefaultChunkSize = 1000
 
-with open(pjoin('index', dirname, 'counts.json'), 'r') as f:
-  counts = json.load(f)
+class Hash64:
+  def __init__(self):
+    pass
+  def __call__(self, x):
+    h = hashlib.sha256()
+    h.update(x.encode())
+    return int(h.hexdigest()[-16:], 16)
+hashfn = Hash64()
 
-def _words2tokens(words):
-  # Filter out ridiculously common words.  We primarily remove
-  # these to keep the index size reasonable.
-  with open('bad.json', 'r') as f:
-    bad = json.load(f)
-  words = [t for t in set(words) if t not in bad]
+def intersect(*iters, limit=kDefaultLimit):
+  return atleast(*iters, k=len(iters), limit=limit)
 
-  # Lower-case word tokens
-  words = [w if ':' in w else w.lower() for w in words]
+def union(*iters, limit=kDefaultLimit):
+  return atleast(*iters, k=1, limit=limit)
 
-  tokens = [h(t) % kNumTokens for t in words]
-  tokens = [pad(hex(t)[2:], n=5, c='0') for t in tokens]
-  tokens = list(tokens)
+def atleast(*iters, k=2, limit=kDefaultLimit):
+  assert 1 <= k <= len(iters)
 
-  # If there are more than 12 tokens, drop the most common.
-  # 16 is probably too large if most tokens are rare, but
-  # this is the best case so we ignore it.  In the worst case
-  # all tokens are very common, so we'd rather err on the side
-  # of using too many tokens.
-  if len(tokens) > 12:
-    T = []
-    for token in tokens:
-      T.append((counts[token + '.list'], token))
-    T.sort()
-    tokens = [t[1] for t in T[:12]]
-  if len(tokens) == 0:
-    tokens = ['allposts']
-  
-  return tokens
+  num_returned = 0
+  try:
+    vals = [next(it) for it in iters]
+    while True:
+      minval = min(vals)
+      if sum([v == minval for v in vals]) >= k:
+        yield minval
+        num_returned += 1
+        if num_returned >= limit:
+          break
 
-class ListFetcher:
-  def __init__(self, dirname, words):
-    self.files = []
-    for token in _words2tokens(words):
-      self.files.append(
-        FileINode(pjoin(dirname, token + '.list'))
-      )
+      for i in range(len(vals)):
+        if vals[i] == minval:
+          vals[i] = next(iters[i])
 
-    if len(self.files) == 0:
-      self.files.append(
-        FileINode(pjoin(dirname, 'allposts.list'))
-      )
+  except StopIteration:
+    return
 
-def query_to_tree(query_text):
-  tokens = tokenize(query_text)
-
-  # tokens = tokenize(query_text)
-  tokens = [(t if t.lower() != 'or' else '+') for t in tokens]
-
-  # Clip depth/score tokens.
-  for i, t in enumerate(tokens):
-    if t[:6] == 'depth:':
-      tokens[i] = f'depth:{min(int(t[6:]), 20)}'
-    elif t[:6] == 'score:':
-      tokens[i] = f'score:{max(min(int(t[6:]), 85), -18)}'
-
-  return tokens, str2tree(tokens)
-
-def expressiontree_to_uniontree(tree):
-  if tree.op not in '+*':
-    token = _words2tokens([tree.op])[0]
-    return FileINode(pjoin('index', dirname, token + '.list'))
-
-  children = [expressiontree_to_uniontree(c) for c in tree.children]
-  if tree.op == '+':
-    return OrINode(*children)
+def token_iterator(token, chunksize=kDefaultChunkSize, limit=kDefaultLimit):
+  if token is None:
+    h = 0
   else:
-    return AndINode(*children)
+    h = hashfn(token) - (1 << 63)
+  r = []
+  i = 0
+  num_returned = 0
+  offset = 0
+  while True:
+    if i >= len(r):
+      i -= len(r)
+      offset += len(r)
+      r = c.execute(f"""
+        SELECT comment_score, comment_id
+        FROM tokens
+        WHERE token_hash={h}
+        ORDER BY comment_score, comment_id
+        LIMIT {chunksize}
+        OFFSET {offset}""").fetchall()
+    if i >= len(r):
+      return
+    yield r[i]
+    num_returned += 1
+    if num_returned >= limit:
+      yield kMaxVal
+      return
+    i += 1
 
-def query(c, query_text, max_results=64):
-  if re.findall(r"[^0-9a-zA-Z_\-: \.\+\(\)]+", query_text):
-    return f'"{query_text}" contains invalid characters'
+def score_iterator(score, chunksize=kDefaultChunkSize, limit=kDefaultLimit, op='>'):
+  r = []
+  i = 0
+  num_returned = 0
+  offset = 0
+  while True:
+    if i >= len(r):
+      i -= len(r)
+      offset += len(r)
+      r = c.execute(f"""
+        SELECT comment_score, comment_id
+        FROM tokens
+        WHERE comment_score{op}{score}
+        AND token_hash=0
+        ORDER BY comment_score, comment_id
+        LIMIT {chunksize}
+        OFFSET {offset}""").fetchall()
+      print('score', r[:10])
+    if i >= len(r):
+      yield kMaxVal
+      return
+    yield r[i]
+    num_returned += 1
+    if num_returned >= kDefaultLimit:
+      return
+    i += 1
 
-  tokens, expression_tree = query_to_tree(query_text)
-  union_tree = expressiontree_to_uniontree(expression_tree)
+parser = MyHTMLParser()
+conn = sqlite3.connect('new.db')
+c = conn.cursor()
 
-  print(expression_tree)
-  print(union_tree.name())
-  print(tokens)
+def tree_to_iter(tree, limit=kDefaultLimit):
+  print(limit, tree)
+  if tree.op == '*':
+    return intersect(*[tree_to_iter(c, limit=float('inf')) for c in tree.children], limit=limit)
+  if tree.op == '+':
+    return union(*[tree_to_iter(c, limit=float('inf')) for c in tree.children], limit=limit)
+  if tree.op == '>':
+    assert tree.children[0].op == '+'
+    thresh = int(tree.children[1].op) + 1
+    return atleast(*[
+        tree_to_iter(c, limit=float('inf')) for c in tree.children[0].children
+      ],
+      limit=limit,
+      k=thresh
+    )
 
-  # lists = ListFetcher(pjoin('index', dirname), tokens)
+  if tree.op[:6] == 'score>':
+    return score_iterator(-int(tree.op[6:]), limit=limit, op='<')
+  elif tree.op[:6] == 'score<':
+    return score_iterator(-int(tree.op[6:]), limit=limit, op='>')
+  elif tree.op[:6] == 'score=':
+    return score_iterator(-int(tree.op[6:]), limit=limit, op='=')
 
-  # merger = Intersection(*lists.files)
+  return token_iterator(tree.op, limit=limit)
 
-  # for candidate in merger:
-  matches = []
-  num_excluded = 0
-  for candidate in union_tree:
-    id_ = int(candidate[8:], 36)
-    c.execute(f"SELECT json FROM comments WHERE id={id_}")
-    j = json.loads(c.fetchone()[0])
+"""
 
-    index_tokens = {}
-    for t in j['tokens'].split(' '):
-      index_tokens[t] = 1
+TODO: if one (or more) of the query tokens is very common it can
+take a very long time (e.g. 2 seconds!) to execute because an
+overwhelming proportion of the common token's documents do not
+contain the rare tokens.
 
-    if expression_tree.eval(index_tokens) == 0:
-      num_excluded += 1
-      continue
+A simple solution is to only use rare tokens for merging and use
+random access to check the common tokens.
 
-    # TODO: depth/score tokens should be unclipped here.
-    matches.append(j)
-    if len(matches) >= max_results:
-      break
 
-  for m in matches:
-    m['body_html'] = m['tokens']
+"""
 
+def query(sql_cursor, user_query, max_results=100):
+  tokens = user_query.strip().lower().split(' ')
+  it = atleast(
+    *[token_iterator(t, limit=float('inf')) for t in tokens],
+    k=len(tokens),
+    limit=max_results
+  )
+
+  R = []
+  try:
+    for i in range(max_results):
+      R.append(next(it))
+  except StopIteration:
+    pass
+  if len(R) > 0 and R[-1] == kMaxVal:
+    R.pop()
+
+  R = [
+    json.loads(c.execute(f"SELECT json FROM comments WHERE comment_id={r[1]}").fetchone()[0]) for r in R
+  ]
+  for i in range(len(R)):
+    T = R[i]["tokens"].split(' ')
+    T.sort()
+    R[i]["tokens"] = ' '.join(T)
   return {
-    "comments": matches,
-    "num_excluded": num_excluded,
-    'tokens': tokens
+    "comments": R,
+    "tokens": tokens,
+    "num_excluded": 0
   }
+
+
+if __name__ == '__main__':
+  conn = sqlite3.connect('new.db')
+  c = conn.cursor()
+  R = query(c, 'year:2020 author:you-get-an-upvote many')
+
+# graces point year:2020 author:HlynkaCG
+
+
+
+

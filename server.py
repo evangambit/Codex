@@ -1,3 +1,5 @@
+from utils import *
+
 import mimetypes, re, sqlite3, sys, time
 import http.server
 import socketserver
@@ -5,10 +7,12 @@ from html.parser import HTMLParser
 from urllib.parse import unquote, urlparse, parse_qs
 
 import pystache
-from query import query
+from spotquery import query
+import spot
 
-conn = sqlite3.connect('comments.db')
-c = conn.cursor()
+import cgi
+
+index = spot.Index('spot-index')
 
 ext2type = mimetypes.types_map.copy()
 
@@ -32,9 +36,6 @@ class FindAndBoldTermsHTMLParser(HTMLParser):
     self.html += f'</{tag}>'
 
   def handle_data(self, data):
-    if 'Apple Inc' in data:
-      print('====' * 9)
-      print(data)
     for term in self.terms:
       data = re.sub(
         re.compile(f"[^\\w\\d]({term})[^\\w\\d]", re.IGNORECASE),
@@ -46,6 +47,7 @@ class FindAndBoldTermsHTMLParser(HTMLParser):
         r"<span class='term'>\1</span> ",
         data,
       )
+    # self.html += cgi.escape(data)
     self.html += data
 
 boulder = FindAndBoldTermsHTMLParser()
@@ -77,31 +79,46 @@ class MyServer(http.server.BaseHTTPRequestHandler):
     print(f'search {args}')
     query_text = ' ' + unquote(args.get('query', [''])[0])
 
-    kMaxResults = 100
-    query_result = query(c, query_text, max_results = kMaxResults+1)
-    if query_result is str:
+    try:
+      max_results = int(args["max_results"][0])
+    except:
+      max_results = 100
+
+    query_result = query(index, query_text, max_results = max_results+1)
+    if type(query_result) is str:
       self.send_error(500, query_result)
       return
 
+    for comment in query_result['comments']:
+      tokens = comment["tokens"].split(' ')
+      tokens = [t for t in tokens if t[:8] == 'pauthor:']
+      if len(tokens) > 0:
+        comment["pauthor"] = tokens[0][8:]
+
     tokens = query_result['tokens']
 
+    parser = MyHTMLParser()
+
     boulder.terms = set([t for t in tokens if (':' not in t) and (t not in '()+')])
-    print(boulder.terms)
+    print('tokens' ,boulder.terms)
     for i in range(len(query_result['comments'])):
       comment = query_result['comments'][i]
       comment['subreddit'] = 'slatestarcodex' if 'slatestarcodex' in comment['permalink'] else 'TheMotte'
       comment['idx'] = i + 1
+      parser.reset()
+      parser.feed(comment["body_html"])
+
       boulder.reset()
-      boulder.feed(comment['body_html'])
+      boulder.feed(parser.alltext)
       comment['body_html'] = boulder.html
+
     with open('template.html', 'r') as f:
       text = f.read()
     dt = time.time() - start_time
-    msg = f'Over {kMaxResults} results in %.3f seconds' % dt if len(query_result['comments']) == kMaxResults + 1 else f'{len(query_result["comments"])} results in %.3f seconds' % dt
+    msg = f'Over {max_results} results in %.3f seconds' % dt if len(query_result['comments']) == max_results + 1 else f'{len(query_result["comments"])} results in %.3f seconds' % dt
     result = pystache.render(text, {
       'comments': query_result['comments'],
-      'num_results_msg': msg,
-      'num_excluded': query_result['num_excluded']
+      'num_results_msg': msg
     })
     self.send_response(200)
     self.send_header("Content-type", "text/html")

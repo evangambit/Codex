@@ -40,17 +40,15 @@ body {
 }
 
 #content {
-  max-width: 600px;;
+  max-width: 600px;
+  min-width: 0;
 }
 
-blockquote {
-  display: block;
-  border-left: solid #bbb 4px;
-  padding: 0 8px;
-  margin: 16px 0;
-}
 code {
   font-family: monospace;
+  display: block;
+  background-color: #333;
+  padding: 0.3em;
 }
 a {
   color: #88f;
@@ -58,6 +56,13 @@ a {
 }
 a:hover {
   text-decoration: none;
+}
+
+quote {
+  display: block;
+  padding: 0 8px;
+  margin: 16px 0;
+  border-left: solid #bbb 4px;
 }
 
 #searchHelpLink {
@@ -90,12 +95,23 @@ input[type=text] {
 
 .term {
   font-weight: 800;
-  color: #fff;
+  color: black;
+  background-color: #ccc;
 }
 </style>
 <script>
 
+const None = null;
+const False = false;
+const True = true;
+
+const comments = {{{comments}}};
+
 const kMaxCommentHeight = 384;
+
+function foo(mod, reportee, url) {
+  alert('u/' + mod + ' banned u/' + reportee + ' for 0 ([context](' + url + '))')
+}
 
 window.onkeydown = (e) => {
   if (document.activeElement === searchInput) {
@@ -126,11 +142,11 @@ window.onload = () => {
     searchInput.value = decodeURIComponent(args.query);
   }
 
-  const numComments = document.getElementsByClassName('md').length;
+  const numComments = document.getElementsByClassName('commentBodyDiv').length;
 
   if (numComments > 1) {
     const parents = Array.from(content.children);
-    for (let div of document.getElementsByClassName('md')) {
+    for (let div of document.getElementsByClassName('commentBodyDiv')) {
       const parent = div.parentNode;
       let r = parent.getBoundingClientRect();
       if (r.height > kMaxCommentHeight) {
@@ -151,14 +167,19 @@ window.onload = () => {
         expand.style.height = '6em';
         expand.style.background = `linear-gradient(
           to bottom,
-          #1110,
-          #111c 50%,
-          #111f 100%
+          #0000,
+          #000c 50%,
+          #000f 100%
         )`;
         expand.style.textAlign = 'right';
         parent.appendChild(expand);
       }
     }
+  }
+
+  for (let div of document.getElementsByClassName("utc")) {
+    let time = new Date() - parseFloat(div.innerHTML) * 1000;
+    div.innerHTML = Math.round(time / 1000 / 60 / 60) + ' hours';
   }
 }
 
@@ -167,10 +188,6 @@ function showhelp(type) {
     searchHelpDiv.style.display = 'block';
     searchHelpLink.innerText = 'help (hide)';
     searchHelpLink.href = "javascript:hidehelp('search')";
-  } else if (type === 'filtered results') {
-    filterHelpDiv.style.display = 'block';
-    filterHelpLink.innerText = '? (hide)';
-    filterHelpLink.href = "javascript:hidehelp('filtered results')";
   }
 }
 function hidehelp(type) {
@@ -178,10 +195,6 @@ function hidehelp(type) {
     searchHelpDiv.style.display = 'none';
     searchHelpLink.innerText = 'help';
     searchHelpLink.href = "javascript:showhelp('search')";
-  } else if (type === 'filtered results') {
-    filterHelpDiv.style.display = 'none';
-    filterHelpLink.innerText = '?';
-    filterHelpLink.href = "javascript:showhelp('filtered results')";
   }
 }
 </script>
@@ -192,6 +205,11 @@ function hidehelp(type) {
 <div id='content'>
   <div style='width:100%; padding-top:1em; display:flex; flex-direction:row;'>
     <input id='searchInput' type='text' style='flex:1;' placeholder='search'>
+    <select>
+      <option>Score</option>
+      <option>Newest</option>
+      <option>Oldest</option>
+    </select>
     <a id='searchHelpLink' href="javascript:showhelp('search')">help</a>
   </div>
 
@@ -199,13 +217,9 @@ function hidehelp(type) {
     {{num_results_msg}}
   </div>
 
-  <div style='margin-top:1em;'>
-    Dropped Results: {{num_excluded}}<sup><a id='filterHelpLink' href="javascript:showhelp('filtered results')">?</a></sup>
-  </div>
-
   <div id='searchHelpDiv' style='display:none; margin-top:1em; background-color: #333; padding:1em; text-align:left; position:relative;'>
     <h3>Guide</h3>
-    <a style='position:absolute; right:0.5em; top:0.5em;' href="javascript:(hidehelp('filtered results'))">hide</a>
+    <a style='position:absolute; right:0.5em; top:0.5em;' href="javascript:(hidehelp('search'))">hide</a>
     <p>
       By default only results that satisfy <i>all</i> (not any) constraints of the query.  Search only supports alphanumeric tokens (e.g. "5-years" is an invalid query, but "5 years" will search for comments that contain "5" and contain "years").
     </p>
@@ -237,18 +251,8 @@ function hidehelp(type) {
           <tr><td>depth:0</td><td>comment is a  top-level comment</td></tr>
         </tbody>
       </table>
-    </p>    
-  </div>
-
-  <div id='filterHelpDiv' style='display:none; margin-top:1em; background-color: #333; padding:1em; text-align:left; position:relative;'>
-    <h3>Dropped Results</h3>
-    <a style='position:absolute; right:0.5em; top:0.5em;' href="javascript:(hidehelp('filtered results'))">hide</a>
-    <p>
-      Despite the ominous name, this is actually quite innocent (if technical). After an initial retrieval stage, retrieved documents are passed through an additional filtering stage, which ensures results are accurate.  The main reason for results to be filtered is due to hash collisions.
     </p>
   </div>
-
-  <br>
 
   {{#comments}}
   <div id="{{id}}" class='commentcontainer'>
@@ -265,8 +269,19 @@ function hidehelp(type) {
       <div><a href="http://reddit.com/r/{{subreddit}}">r/{{subreddit}}</a></div>
       <div style='flex:1'></div>
       <div><a href="https://www.reddit.com{{{permalink}}}">link</a></div>
+      <div style='flex:1'></div>
+      <div class="utc">{{created_utc}}</div>
+      <div style='flex:1'></div>
+      <div>{{pauthor}}</div>
+      <div style='flex:1'></div>
+      <div>
+        <button onclick="foo('{{author}}', '{{pauthor}}', 'https://www.reddit.com{{{permalink}}}')">cpy</button>
+      </div>
     </div>
-    {{{body_html}}}
+    <!-- <div>{{{tokens}}}</div><hr> -->
+    <div class='commentBodyDiv'>
+      {{{body_html}}}
+    </div>
   </div>
   {{/comments}}
 

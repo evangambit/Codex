@@ -1,110 +1,71 @@
 from utils import *
-import matplotlib.pyplot as plt
-import numpy as np
-import torch
 
-# from comment2features import comment2features
+import spot
 
-class TokenListFile:
-  def __init__(self, path):
-    self.path = path
-    if not os.path.exists(self.path):
-      with open(self.path, 'w+') as f:
-        f.write('')
-    self.vals = []
-    self.n = 0
+import time
 
-  def add(self, id_, score):
-    self.n += 1
-    self.vals.append((id_, score))
-    if len(self.vals) > 100:
-      self.flush()
+if os.path.exists('spot-index'):
+  os.remove('spot-index')
 
-  def flush(self):
-    lines = []
-    for id_, score in self.vals:
-      id_ = pad(np.base_repr(id_, 36).lower(), n=7, c='0')
-      score = pad(np.base_repr(score, 36).lower(), n=7, c='0')
-      lines.append(score + ' ' + id_)
-    with open(self.path, 'a') as f:
-      f.write('\n'.join(lines) + '\n')
-    self.vals = []
+index = spot.Index.create('spot-index', rankings=['score'], ranges=['created_utc'])
 
-argparser = argparse.ArgumentParser()
-argparser.add_argument("--numTokens", type=int, default=16384)
-argparser.add_argument("--score", type=str)
-argparser.add_argument("--outdir", type=str)
-argparser.add_argument("--force", '-f', action='store_true')
-args = argparser.parse_args()
+comment_insertions = 0
+token_insertions = 0
 
-assert (args.outdir is not None) == (args.score is not None)
+lasttime = time.time()
 
-if os.path.exists(args.outdir):
-  if args.force:
-    shutil.rmtree(args.outdir)
-  else:
-    print(f'Path "{args.outdir}" already exists')
-    exit(0)
-os.mkdir(args.outdir)
+ids = set()
+allscores = []
+for thread in threads():
+  comments = thread['comments']
 
-assert args.score in ['new', 'old', 'score', 'depth']
+  id2comment = {}
+  for comment in comments:
+    id2comment[comment['id']] = comment
 
-# Score functions return an integer between [0, 36^7 - 1]
-kMaxInt = 36**7 - 1
-if args.score == 'new':
-  def get_score(comment):
-    return int(comment['created'])
-elif args.score == 'old':
-  def get_score(comment):
-    return kMaxInt - int(comment['created'])
-elif args.score == 'score':
-  def get_score(comment):
-    return (kMaxInt//2) - comment.get('score', 0)
-elif args.score == 'depth':
-  def get_score(comment):
-    return int(comment['depth'])
+  for comment in comments:
+    if 'body_html' not in comment:
+      continue
+    if comment['body'] == '[deleted]':
+      continue
+    if comment['body_html'] == '<div class="md"><p>[deleted]</p>\n</div>':
+      continue
 
-lists = {
-  'allposts': TokenListFile(pjoin(args.outdir, 'allposts.list'))
-}
-for i in range(args.numTokens):
-  lists[i] = TokenListFile(pjoin(args.outdir, pad(hex(i)[2:], n=5, c='0') + '.list'))
+    depth = 0
+    parent = id2comment.get(comment['parent_id'][3:], None)
+    gparent = None
+    if parent:
+      depth += 1
+      while parent['parent_id'][3:] in id2comment:
+        depth += 1
+        parent = id2comment.get(parent['parent_id'][3:], None)
+    comment['depth'] = depth
 
-conn = sqlite3.connect('comments.db')
-c = conn.cursor()
+    tokens = get_tokens(comment, parent, gparent, thread, isthread=False)
+    comment['tokens'] = ' '.join(tokens)
 
-c.execute('SELECT * FROM comments')
-it = -1
-for row in c:
-  it += 1
-  if it % 10000 == 0:
-    print(it)
-  id_, j = row
-  comment = json.loads(j)
-  if 'body_html' not in comment:
-    continue
+    # Save some space -- all this information is in body_html anyway
+    del comment['body']
 
-  score = get_score(comment)
+    if 'score' not in comment:
+      comment['score'] = comment.get('ups', 0)
 
-  for token in comment['tokens'].split(' '):
-    lists[h(token) % args.numTokens].add(id_, score)
-  lists['allposts'].add(id_, score)
+    id_ = int(comment['id'], 36)
+    if id_ in ids:
+      continue
+    ids.add(id_)
 
-print('flushing')
-for token in lists:
-  lists[token].flush()
+    index.insert(id_, tokens, comment)
+    comment_insertions += 1
+    token_insertions += len(tokens)
 
-print('sorting')
-for i, token in enumerate(lists):
-  if i % 500 == 0:
-    print(i, len(lists))
-  l = lists[token]
-  os.system(f'sort "{l.path}" -u -o "{l.path}"')
+    if comment_insertions % 10000 == 0:
+    	print('%.3f' % (time.time() - lasttime), comment_insertions, token_insertions)
+    	lasttime = time.time()
 
-counts = {}
-for k in lists:
-  counts[k] = lists[k].n
+index.create_indices()
 
-with open(pjoin(args.outdir, 'counts.json'), 'w+') as f:
-  json.dump(counts, f)
+index.commit()
 
+print(comment_insertions, 'comments inserted')
+print(token_insertions, 'tokens inserted')
